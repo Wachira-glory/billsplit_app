@@ -1,6 +1,10 @@
 'use server'
 
-import { createClient } from '@supabase/supabase-js';
+
+import { createClient as createAuthClient} from '@/utils/server';
+import { UNDA_CONFIG } from '@/utils/unda.config';
+import { createClient as createUndaClient } from '@supabase/supabase-js';
+import { redirect } from 'next/navigation';
 
 const UNDA_URL = process.env.NEXT_PUBLIC_UNDA_SUPABASE_URL;
 const UNDA_ANON_KEY = process.env.NEXT_PUBLIC_UNDA_SUPABASE_ANON_KEY;
@@ -8,15 +12,14 @@ const UNDA_EMAIL = process.env.NEXT_PUBLIC_UNDA_API_EMAIL;
 const UNDA_PASSWORD = process.env.UNDA_API_PASSWORD;
 const PLATFORM_UID = process.env.NEXT_PUBLIC_UNDA_PLATFORM_UID;
 
-/**
- * HELPER: Authenticates with Unda
- */
+
 async function getUndaSession() {
   if (!UNDA_URL || !UNDA_ANON_KEY || !UNDA_EMAIL || !UNDA_PASSWORD) {
     throw new Error("Missing Unda Environment Variables");
   }
-
-  const tempClient = createClient(UNDA_URL, UNDA_ANON_KEY);
+  //This is where connection with Unda is done
+  const tempClient = createUndaClient(UNDA_URL, UNDA_ANON_KEY);
+  //This is where the generation of the JWT is done, which will help in queryting the tables
   const { data, error } = await tempClient.auth.signInWithPassword({
     email: UNDA_EMAIL,
     password: UNDA_PASSWORD,
@@ -32,10 +35,123 @@ async function getUndaSession() {
   };
 }
 
-/**
- * FOR CREATE BILL PAGE: 
- * Fetches merchant channels.
- */
+
+export async function triggerMpesaPush(params: {
+  amount: number;
+  phone: string;
+  reference: string;
+  customer_name: string;
+  active_channel: any; 
+  account_id: number;
+}) {
+  console.log("LOG: Entering triggerMpesaPush (Dedicated Mode)");
+  
+  // 1. Validate Channel Data
+  if (!params.active_channel) {
+    console.error("LOG: CRITICAL - active_channel is missing");
+    return { success: false, error: "No payment channel selected." };
+  }
+
+  // 2. Extract Channel Identity
+  const channel = params.active_channel;
+  const channelName = channel.name || "Merchant";
+  const channelApiKey = channel.api_key;
+  
+  // We pull the config saved during channel creation (Till 4139377)
+  const cfg = channel.config || channel.idata || {};
+
+  try {
+    const { token, apiKey } = await getUndaSession();
+
+    const payload = {
+  amount: params.amount,
+  customer_no: params.phone.replace(/\D/g, '').replace(/^0/, '254'),
+  reference: params.reference,
+  to_ac_id: params.account_id,
+  details: { 
+    customer_name: params.customer_name,
+    // Remove all the crosscharge/mode hints — the Edge Function ignores them
+  }
+};
+
+    console.log(`LOG: Triggering STK for ${channelName} using Key: ${channelApiKey?.substring(0, 8)}...`);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_UNDA_SUPABASE_URL}/functions/v1/api-public-channels-mpesa-charge-req?api_key=${channelApiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': apiKey,
+          'Authorization': `Bearer ${token}`,
+          'x-platform-uid': process.env.NEXT_PUBLIC_UNDA_PLATFORM_UID as string,
+          // Hint to the Edge Function that we are in Dedicated Mode
+          'x-channel-mode': 'dedicated' 
+        },
+        body: JSON.stringify(payload)
+      }
+    );
+
+    const result = await response.json();
+    
+    if (!response.ok) {
+      console.error("LOG: API Error Response:", result);
+      throw new Error(result.error?.message || "M-Pesa Push Failed");
+    }
+
+    return { success: true, data: result };
+
+  } catch (error: any) {
+    console.error("LOG: Final Catch Error:", error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+
+export async function getChannelById(channelId: number) {
+  try {
+    const { token, apiKey } = await getUndaSession();
+    
+    const response = await fetch(`${UNDA_URL}/rest/v1/channels?id=eq.${channelId}&select=*`, {
+      method: 'GET',
+      headers: {
+        "apikey": apiKey,
+        "Authorization": `Bearer ${token}`,
+        "Content-Type": "application/json"
+      }
+    });
+
+    const data = await response.json();
+
+    if (response.ok && Array.isArray(data) && data.length > 0) {
+      return { success: true, data: data[0] };
+    }
+
+    return { success: false, error: "Channel not found" };
+  } catch (error: any) {
+    console.error("getChannelById Error:", error.message);
+    return { success: false, error: error.message };
+  }
+}
+
+export async function signup(formData: FormData) {
+  const supabase = await createAuthClient()
+
+  const email = formData.get('email') as string
+  const password = formData.get('password') as string
+
+  const { error } = await supabase.auth.signUp({
+    email,
+    password,
+  })
+
+  if (error) {
+    return redirect('/signup?message=Could not authenticate user')
+  }
+
+  return redirect('/signup?message=Check email to continue sign in')
+}
+
 export async function getMerchantChannels(platformId: number = 23, userId?: string) {
   try {
     const { token, apiKey } = await getUndaSession();
@@ -63,9 +179,7 @@ export async function getMerchantChannels(platformId: number = 23, userId?: stri
   }
 }
 
-/**
- * SYNC BILL: Creates the account record in Unda.
- */
+
 export async function syncBillToUnda(billPayload: any) {
   try {
     const { token, apiKey } = await getUndaSession();
@@ -88,9 +202,7 @@ export async function syncBillToUnda(billPayload: any) {
   }
 }
 
-/**
- * GET BILL: Retrieves bill and links the active channel.
- */
+
 export async function getBillFromUnda(slug: string) {
   try {
     const { token, apiKey } = await getUndaSession();
@@ -119,55 +231,49 @@ export async function getBillFromUnda(slug: string) {
   }
 }
 
-/**
- * TRIGGER PUSH: Initiates STK Push via Unda Edge Function.
- */
-export async function triggerMpesaPush(params: {
-  amount: number;
-  phone: string;
-  reference: string;
-  customer_name: string;
-  channel_api_key: string;
-  account_id: number;
-}) {
-  try {
-    const { token, apiKey } = await getUndaSession();
 
-    let cleanPhone = params.phone.replace(/\D/g, ''); 
-    if (cleanPhone.startsWith('0')) cleanPhone = '254' + cleanPhone.substring(1);
+// export async function triggerMpesaPush(params: {
+//   amount: number;
+//   phone: string;
+//   reference: string;
+//   customer_name: string;
+//   channel_api_key: string;
+//   account_id: number;
+// }) {
+//   try {
+//     const { token, apiKey } = await getUndaSession();
 
-    const response = await fetch(
-      `${UNDA_URL}/functions/v1/api-public-channels-mpesa-charge-req?api_key=${params.channel_api_key}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'apikey': apiKey,
-          'Authorization': `Bearer ${token}`,
-          'x-platform-uid': PLATFORM_UID!
-        },
-        body: JSON.stringify({
-          amount: params.amount,
-          customer_no: cleanPhone,
-          reference: params.reference,
-          to_ac_id: params.account_id,
-          details: { customer_name: params.customer_name }
-        })
-      }
-    );
+//     let cleanPhone = params.phone.replace(/\D/g, ''); 
+//     if (cleanPhone.startsWith('0')) cleanPhone = '254' + cleanPhone.substring(1);
 
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error?.message || "STK Push Failed");
+//     const response = await fetch(
+//       `${UNDA_URL}/functions/v1/api-public-channels-mpesa-charge-req?api_key=${params.channel_api_key}`,
+//       {
+//         method: 'POST',
+//         headers: {
+//           'Content-Type': 'application/json',
+//           'apikey': apiKey,
+//           'Authorization': `Bearer ${token}`,
+//           'x-platform-uid': PLATFORM_UID!
+//         },
+//         body: JSON.stringify({
+//           amount: params.amount,
+//           customer_no: cleanPhone,
+//           reference: params.reference,
+//           to_ac_id: params.account_id,
+//           details: { customer_name: params.customer_name }
+//         })
+//       }
+//     );
 
-    return { success: true, data: result.data || result };
-  } catch (error: any) {
-    return { success: false, error: error.message };
-  }
-}
+//     const result = await response.json();
+//     if (!response.ok) throw new Error(result.error?.message || "STK Push Failed");
 
-/**
- * CHECK PAYMENT STATUS: Polls the public payments view using account_slug.
- */
+//     return { success: true, data: result.data || result };
+//   } catch (error: any) {
+//     return { success: false, error: error.message };
+//   }
+// }
 
 
 export async function checkPaymentStatus(slug: string) {
@@ -178,7 +284,7 @@ export async function checkPaymentStatus(slug: string) {
     const PLATFORM_UID = "2731028a-9103-47aa-8f0e-3a121fbeb2d8";
 
     // 2. Updated URL to include 'idata' and specific fields just like the CURL
-    const url = `${UNDA_URL}/rest/v1/payments?reference=ilike.*${slug}*&select=id,status,amount,uid,idata,created_at&order=created_at.desc`;
+    const url = `${UNDA_URL}/rest/v1/payments?reference=ilike.*${slug}*&select=id,status,amount,uid,idata,data, created_at&order=created_at.desc`;
 
     console.log("POLLING BY REFERENCE SLUG:", slug);
 

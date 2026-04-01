@@ -1,9 +1,10 @@
 'use client'
 
 import { useState, use } from 'react' // Added 'use' to unwrap promises
-import { signup } from '@/app/(auth)/actions'
+// import { signup } from '@/app/(auth)/actions'
 import Link from 'next/link'
 import { Eye, EyeOff, ShieldCheck, ShieldAlert, Mail, AlertCircle } from 'lucide-react'
+import { signup } from '@/app/actions/unda'
 
 export default function SignupPage(props: { 
   searchParams: Promise<{ message?: string, error?: string }> 
