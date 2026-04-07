@@ -1,7 +1,6 @@
 'use client'
 
-import { useState, use } from 'react' // Added 'use' to unwrap promises
-// import { signup } from '@/app/(auth)/actions'
+import { useState, use } from 'react' 
 import Link from 'next/link'
 import { Eye, EyeOff, ShieldCheck, ShieldAlert, Mail, AlertCircle } from 'lucide-react'
 import { signup } from '@/app/actions/unda'
@@ -9,7 +8,7 @@ import { signup } from '@/app/actions/unda'
 export default function SignupPage(props: { 
   searchParams: Promise<{ message?: string, error?: string }> 
 }) {
-  const searchParams = use(props.searchParams) // Unwrap the promise
+  const searchParams = use(props.searchParams) 
   
   const [showPass, setShowPass] = useState(false)
   const [password, setPassword] = useState('')

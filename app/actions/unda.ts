@@ -85,7 +85,6 @@ export async function triggerMpesaPush(params: {
           'apikey': apiKey,
           'Authorization': `Bearer ${token}`,
           'x-platform-uid': process.env.NEXT_PUBLIC_UNDA_PLATFORM_UID as string,
-          // Hint to the Edge Function that we are in Dedicated Mode
           'x-channel-mode': 'dedicated' 
         },
         body: JSON.stringify(payload)
