@@ -11,7 +11,6 @@ export default function NewBillPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // States
   const [billName, setBillName] = useState('Table 7 - Lunch');
   const [totalAmount, setTotalAmount] = useState(12400);
   const [peopleCount, setPeopleCount] = useState(4);
@@ -20,7 +19,6 @@ export default function NewBillPage() {
   const [generatedLink, setGeneratedLink] = useState("");
   const [showToast, setShowToast] = useState(false);
   
-  // NEW: State for Unda Channels
   const [activeChannel, setActiveChannel] = useState<any>(null);
   const [loadingChannels, setLoadingChannels] = useState(true);
 
@@ -29,11 +27,9 @@ export default function NewBillPage() {
 
  useEffect(() => {
   const initializePage = async () => {
-    // 1. Get the current logged-in user from your local Supabase
     const { data: { user } } = await supabase.auth.getUser();
     
     if (user) {
-      // Get Profile
       const { data: profile } = await supabase
         .from('profiles')
         .select('full_name')
@@ -41,11 +37,9 @@ export default function NewBillPage() {
         .single();
       if (profile) setUserProfile(profile);
 
-      // 2. Fetch Channels ONLY for this user
       const result = await getMerchantChannels(23, user.id); 
       
       if (result.success && result.data.length > 0) {
-        // Find the one marked is_default: true
         const active = result.data.find((c: any) => c.idata?.is_default === true) || result.data[0];
         setActiveChannel(active);
       }
@@ -85,7 +79,6 @@ export default function NewBillPage() {
           per_person: perPersonAmount,
           waiter_ref: userProfile?.full_name || 'Waiter',
           created_at: new Date().toISOString(),
-          // Store channel info inside the bill metadata
           channel_id: activeChannel.id,
           channel_name: activeChannel.name
         },

@@ -45,18 +45,14 @@ const fetchChannels = useCallback(async () => {
 
     console.log('Raw data from Edge Function:', data);
 
-    // 1. Ensure data is an array
     if (!Array.isArray(data)) {
       setChannels([]);
       return;
     }
 
-    // 2. Robust filtering
     const userChannels = data.filter((ch: any) => {
-      // Handle cases where idata might be a string (JSONB oddity) or undefined
       const idata = typeof ch.idata === 'string' ? JSON.parse(ch.idata) : ch.idata;
       
-      // Match the owner_id to the logged in user
       return idata?.owner_id === user.id;
     });
 
@@ -73,69 +69,12 @@ const fetchChannels = useCallback(async () => {
 
   useEffect(() => { fetchChannels(); }, [fetchChannels]);
 
-//  const handleCreateChannel = async (e: React.FormEvent) => {
-//   e.preventDefault();
-  
-//   // 1. Get fresh user context
-//   const { data: { user } } = await supabase.auth.getUser();
-//   if (!user) {
-//     setError("Login required");
-//     return;
-//   }
-
-//   console.log('Registering channel for User:', user.id);
-
-//   setIsCreating(true);
-//   setError(null);
-
-//   try {
-//     // 2. Generate a unique UID to avoid 409 Conflict errors
-//     const uniqueUid = `${newUid}-${user.id.substring(0, 8)}`;
-
-//     // 3. POST the payload exactly as the database expects it
-//     await undaFetch('channels', {
-//       method: 'POST',
-//       body: {
-//         p_id: 23, // Ensure this is a number
-//         uid: uniqueUid,
-//         name: newName,
-//         provider: 'mpesa',
-//         category: 'inbound',
-//         mode: 'child',
-//         parent_channel_id: 2,
-//         status: 'active',
-//         idata: {
-//           is_default: true,
-//           owner_id: user.id, // Links the channel to the logged-in user
-//           display_uid: newUid, // The human-readable paybill number
-//         },
-//       },
-//     });
-
-//     // 4. Success cleanup
-//     setNewUid('');
-//     setNewName('');
-    
-//     // Refresh the list immediately
-//     await fetchChannels();
-    
-//   } catch (err: any) {
-//     console.error("Creation Error:", err);
-//     // User-friendly error for duplicate paybills
-//     if (err.message?.includes('unique') || err.message?.includes('409')) {
-//       setError("This paybill is already registered.");
-//     } else {
-//       setError(err.message || "Failed to create channel.");
-//     }
-//   } finally {
-//     setIsCreating(false);
-//   }
-// };
 
 const handleCreateChannel = async (e: React.FormEvent) => {
   e.preventDefault();
   
   const { data: { user } } = await supabase.auth.getUser();
+  const { data: { session } } = await supabase.auth.getSession();
   if (!user) {
     setError("Login required");
     return;
@@ -147,36 +86,38 @@ const handleCreateChannel = async (e: React.FormEvent) => {
   try {
     const platformId = Number(process.env.NEXT_PUBLIC_UNDA_PLATFORM_ID) || 23;
 
-    // Build the payload for a Dedicated Till
     const payload = {
       p_id: platformId,
-      uid: `${newUid}-${user.id.substring(0, 8)}`, // Unique ID for Unda
+      uid: `${newUid}-${user.id.substring(0, 8)}`,
       name: newName,
       provider: 'mpesa',
       category: 'inbound',
-      mode: 'dedicated', // Crucial: This makes it a standalone "VIP" channel
+      mode: 'dedicated',
       status: 'active',
       
-      // THIS IS WHAT THE EDGE FUNCTION READS
       config: {
-        short_code: newUid,           // e.g., "4139377"
-        shortcode_type: 'till_no',    // Explicitly set for Buy Goods
-        crosscharge_enabled: true,    // Triggers the special routing
+        short_code: newUid,           
+        shortcode_type: 'till_no',    
+        crosscharge_enabled: true,    
       },
 
       idata: {
         is_default: true,
         owner_id: user.id,
-        display_uid: newUid,          // What shows up in your UI
+        display_uid: newUid,          
       },
     };
 
-    await undaFetch('channels', {
-      method: 'POST',
-      body: payload,
-    });
+  await undaFetch('channels', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${session?.access_token}`,
+    'x-platform-uid': process.env.NEXT_PUBLIC_UNDA_PLATFORM_UID,
+    'Content-Type': 'application/json'
+  },
+  body: payload,
+});
 
-    // Cleanup
     setNewUid('');
     setNewName('');
     await fetchChannels();
@@ -194,7 +135,6 @@ const handleCreateChannel = async (e: React.FormEvent) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 1. Optimistic UI update: Toggle checkmarks immediately
     const previousChannels = [...channels];
     setChannels(prev => prev.map(ch => ({
       ...ch,
@@ -204,8 +144,7 @@ const handleCreateChannel = async (e: React.FormEvent) => {
     const targetChannel = channels.find(c => c.id === channelId);
     if (!targetChannel) return;
 
-    // 2. Define the updates
-    // Set the new default
+    
     const updateDefault = undaFetch(`channels?id=eq.${channelId}`, {
       method: 'PATCH',
       body: {
@@ -213,7 +152,6 @@ const handleCreateChannel = async (e: React.FormEvent) => {
       },
     });
 
-    // Set all others to false
     const otherChannels = channels.filter(c => c.id !== channelId && c.idata.is_default);
     const updateOthers = otherChannels.map(ch => 
       undaFetch(`channels?id=eq.${ch.id}`, {
@@ -224,13 +162,11 @@ const handleCreateChannel = async (e: React.FormEvent) => {
       })
     );
 
-    // 3. Execute all updates in parallel
     await Promise.all([updateDefault, ...updateOthers]);
 
   } catch (err: any) {
     console.error("Update failed:", err);
     setError("Could not update default channel. Syncing list...");
-    // Rollback or refresh on error
     fetchChannels();
   }
 };
