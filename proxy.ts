@@ -50,7 +50,7 @@ export async function proxy(request: NextRequest) {
   if (user && isAuthRoute) {
     // Redirect already-logged-in users away from auth pages
     const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
+    url.pathname = '/create-bill'
     return NextResponse.redirect(url)
   }
 
