@@ -60,7 +60,7 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [https://billsplit-mfhkvqzq4-wachira-glorys-projects.vercel.app/login
+  matcher: [
     /*
      * Match all request paths EXCEPT:
      * - _next/static (static files)
