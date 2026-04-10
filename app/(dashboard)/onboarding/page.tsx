@@ -23,27 +23,72 @@ export default function ChannelManager() {
   const [newName, setNewName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+// const fetchChannels = useCallback(async () => {
+//   setLoading(true);
+//   setError(null);
+//   try {
+//     const { data: { user } } = await supabase.auth.getUser();
+//     if (!user) {
+//       setLoading(false);
+//       return;
+//     }
+
+//     const platformUid = process.env.NEXT_PUBLIC_UNDA_PLATFORM_UID;
+//     console.log('Fetching for Platform UUID:', platformUid);
+
+//     const data = await undaFetch('functions/v1/api-public-channels', {
+//       method: 'GET',
+//       headers: {
+//         'x-platform-uid': platformUid as string,
+//       },
+//     });
+
+//     console.log('Raw data from Edge Function:', data);
+
+//     if (!Array.isArray(data)) {
+//       setChannels([]);
+//       return;
+//     }
+
+//     const userChannels = data.filter((ch: any) => {
+//       const idata = typeof ch.idata === 'string' ? JSON.parse(ch.idata) : ch.idata;
+      
+//       return idata?.owner_id === user.id;
+//     });
+
+//     console.log('Filtered User Channels:', userChannels);
+//     setChannels(userChannels);
+
+//   } catch (err: any) {
+//     console.error('Fetch failed:', err.message);
+//     setError(err.message);
+//   } finally {
+//     setLoading(false);
+//   }
+// }, []);
 const fetchChannels = useCallback(async () => {
   setLoading(true);
   setError(null);
   try {
+    // 1. Get both user AND session
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!user || !session) {
       setLoading(false);
       return;
     }
 
     const platformUid = process.env.NEXT_PUBLIC_UNDA_PLATFORM_UID;
-    console.log('Fetching for Platform UUID:', platformUid);
 
+    // 2. Add the Authorization header here
     const data = await undaFetch('functions/v1/api-public-channels', {
       method: 'GET',
       headers: {
+        'Authorization': `Bearer ${session.access_token}`, // <--- CRITICAL
         'x-platform-uid': platformUid as string,
       },
     });
-
-    console.log('Raw data from Edge Function:', data);
 
     if (!Array.isArray(data)) {
       setChannels([]);
@@ -52,16 +97,14 @@ const fetchChannels = useCallback(async () => {
 
     const userChannels = data.filter((ch: any) => {
       const idata = typeof ch.idata === 'string' ? JSON.parse(ch.idata) : ch.idata;
-      
       return idata?.owner_id === user.id;
     });
 
-    console.log('Filtered User Channels:', userChannels);
     setChannels(userChannels);
 
   } catch (err: any) {
     console.error('Fetch failed:', err.message);
-    setError(err.message);
+    setError("Failed to authenticate with Unda. Try logging out and back in.");
   } finally {
     setLoading(false);
   }
